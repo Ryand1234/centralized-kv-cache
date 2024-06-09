@@ -25,14 +25,14 @@ func Init() *Cache {
 	}
 }
 
-func (c *Cache) set(key, value string) {
+func (c *Cache) Set(key, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	expiration := time.Now().AddDate(1,0,0).UnixNano()
 	c.data[key] = CacheEntry{Value: value, Expiration: expiration, Expiry: false}
 }
 
-func (c *Cache) setT(key, value string, duration time.Duration) {
+func (c *Cache) SetT(key, value string, duration time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	expiration := time.Now().Add(duration).UnixNano()
@@ -41,7 +41,7 @@ func (c *Cache) setT(key, value string, duration time.Duration) {
 
 
 
-func (c *Cache) get(key string) (string, bool) {
+func (c *Cache) Get(key string) (string, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	entry, found := c.data[key]
@@ -51,9 +51,24 @@ func (c *Cache) get(key string) (string, bool) {
 	return entry.Value, true
 }
 
+func (c *Cache) CleanUp() {
+	for {
+		time.Sleep(time.Minute)
+		now := time.Now().UnixNano()
+		c.mu.Lock()
+		for key, entry := range c.data {
+			if now > entry.Expiration && entry.Expiry {
+				delete(c.data, key)
+			}
+		}
+		c.mu.Unlock()
+	}
+}
+
 func main() {
 	r := gin.Default()
 	cache := Init()
+	go cache.CleanUp()
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "This is get request",
@@ -73,9 +88,9 @@ func main() {
 				})
 				return
 			}
-			go cache.setT(key, value, duration)
+			go cache.SetT(key, value, duration)
 		} else {
-			go cache.set(key, value)
+			go cache.Set(key, value)
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Key updated in cache",
@@ -83,7 +98,7 @@ func main() {
 	})
 	r.GET("/get", func(c *gin.Context) {
 		key := c.Query("key")
-		value, found := cache.get(key)
+		value, found := cache.Get(key)
 		if !found {
 			c.JSON(http.StatusNotFound, gin.H{
 				"message": "key not present in cache",
